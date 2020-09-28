@@ -1,20 +1,17 @@
-from __future__ import absolute_import, unicode_literals
-
 import socket
 import tempfile
 from datetime import datetime, timedelta
+from unittest.mock import ANY, MagicMock, Mock, patch
 
 import pytest
-from case import ANY, ContextMock, MagicMock, Mock, patch
+from case import ContextMock
 from kombu import Queue
 from kombu.exceptions import EncodeError
 
 from celery import Task, group, uuid
 from celery.app.task import _reprtask
 from celery.exceptions import Ignore, ImproperlyConfigured, Retry
-from celery.five import items, range, string_t
 from celery.result import AsyncResult, EagerResult
-from celery.task.base import Task as OldTask
 from celery.utils.time import parse_iso8601
 
 try:
@@ -93,6 +90,72 @@ class TasksCase:
                 raise self.retry(countdown=0)
 
         self.retry_task_noargs = retry_task_noargs
+
+        @self.app.task(bind=True, max_retries=3, iterations=0, shared=False)
+        def retry_task_return_without_throw(self, **kwargs):
+            self.iterations += 1
+            try:
+                if self.request.retries >= 3:
+                    return 42
+                else:
+                    raise Exception("random code exception")
+            except Exception as exc:
+                return self.retry(exc=exc, throw=False)
+
+        self.retry_task_return_without_throw = retry_task_return_without_throw
+
+        @self.app.task(bind=True, max_retries=3, iterations=0, shared=False)
+        def retry_task_return_with_throw(self, **kwargs):
+            self.iterations += 1
+            try:
+                if self.request.retries >= 3:
+                    return 42
+                else:
+                    raise Exception("random code exception")
+            except Exception as exc:
+                return self.retry(exc=exc, throw=True)
+
+        self.retry_task_return_with_throw = retry_task_return_with_throw
+
+        @self.app.task(bind=True, max_retries=3, iterations=0, shared=False, autoretry_for=(Exception,))
+        def retry_task_auto_retry_with_single_new_arg(self, ret=None, **kwargs):
+            if ret is None:
+                return self.retry(exc=Exception("I have filled now"), args=["test"], kwargs=kwargs)
+            else:
+                return ret
+
+        self.retry_task_auto_retry_with_single_new_arg = retry_task_auto_retry_with_single_new_arg
+
+        @self.app.task(bind=True, max_retries=3, iterations=0, shared=False)
+        def retry_task_auto_retry_with_new_args(self, ret=None, place_holder=None, **kwargs):
+            if ret is None:
+                return self.retry(args=[place_holder, place_holder], kwargs=kwargs)
+            else:
+                return ret
+
+        self.retry_task_auto_retry_with_new_args = retry_task_auto_retry_with_new_args
+
+        @self.app.task(bind=True, max_retries=3, iterations=0, shared=False, autoretry_for=(Exception,))
+        def retry_task_auto_retry_exception_with_new_args(self, ret=None, place_holder=None, **kwargs):
+            if ret is None:
+                return self.retry(exc=Exception("I have filled"), args=[place_holder, place_holder], kwargs=kwargs)
+            else:
+                return ret
+
+        self.retry_task_auto_retry_exception_with_new_args = retry_task_auto_retry_exception_with_new_args
+
+        @self.app.task(bind=True, max_retries=3, iterations=0, shared=False)
+        def retry_task_raise_without_throw(self, **kwargs):
+            self.iterations += 1
+            try:
+                if self.request.retries >= 3:
+                    return 42
+                else:
+                    raise Exception("random code exception")
+            except Exception as exc:
+                raise self.retry(exc=exc, throw=False)
+
+        self.retry_task_raise_without_throw = retry_task_raise_without_throw
 
         @self.app.task(bind=True, max_retries=3, iterations=0,
                        base=MockApplyTask, shared=False)
@@ -351,6 +414,30 @@ class test_task_retries(TasksCase):
         finally:
             self.retry_task_mockapply.pop_request()
 
+    def test_retry_without_throw_eager(self):
+        assert self.retry_task_return_without_throw.apply().get() == 42
+
+    def test_raise_without_throw_eager(self):
+        assert self.retry_task_raise_without_throw.apply().get() == 42
+
+    def test_return_with_throw_eager(self):
+        assert self.retry_task_return_with_throw.apply().get() == 42
+
+    def test_eager_retry_with_single_new_params(self):
+        assert self.retry_task_auto_retry_with_single_new_arg.apply().get() == "test"
+
+    def test_eager_retry_with_new_params(self):
+        assert self.retry_task_auto_retry_with_new_args.si(place_holder="test").apply().get() == "test"
+
+    def test_eager_retry_with_autoretry_for_exception(self):
+        assert self.retry_task_auto_retry_exception_with_new_args.si(place_holder="test").apply().get() == "test"
+
+    def test_retry_eager_should_return_value(self):
+        self.retry_task.max_retries = 3
+        self.retry_task.iterations = 0
+        assert self.retry_task.apply([0xFF, 0xFFFF]).get() == 0xFF
+        assert self.retry_task.iterations == 4
+
     def test_retry_not_eager(self):
         self.retry_task_mockapply.push_request()
         try:
@@ -493,7 +580,7 @@ class test_task_retries(TasksCase):
         ]
         assert retry_call_countdowns == [1, 2, 4, 8, 16, 32]
 
-    @patch('celery.app.base.get_exponential_backoff_interval')
+    @patch('celery.app.autoretry.get_exponential_backoff_interval')
     def test_override_retry_backoff_from_base(self, backoff):
         self.override_retry_backoff.iterations = 0
         self.override_retry_backoff.apply((1, "a"))
@@ -559,6 +646,27 @@ class test_task_retries(TasksCase):
         self.autoretry_task.apply((1, 0))
         assert self.autoretry_task.iterations == 6
 
+    def test_autoretry_class_based_task(self):
+        class ClassBasedAutoRetryTask(Task):
+            name = 'ClassBasedAutoRetryTask'
+            autoretry_for = (ZeroDivisionError,)
+            retry_kwargs = {'max_retries': 5}
+            retry_backoff = True
+            retry_backoff_max = 700
+            retry_jitter = False
+            iterations = 0
+            _app = self.app
+
+            def run(self, x, y):
+                self.iterations += 1
+                return x / y
+
+        task = ClassBasedAutoRetryTask()
+        self.app.tasks.register(task)
+        task.iterations = 0
+        task.apply([1, 0])
+        assert task.iterations == 6
+
 
 class test_canvas_utils(TasksCase):
 
@@ -605,43 +713,6 @@ class test_tasks(TasksCase):
             return 'fooxyz'
 
         @self.app.task(shadow_name=shadow_name)
-        def shadowed():
-            pass
-
-        old_send_task = self.app.send_task
-        self.app.send_task = Mock()
-
-        shadowed.delay()
-
-        self.app.send_task.assert_called_once_with(ANY, ANY, ANY,
-                                                   compression=ANY,
-                                                   delivery_mode=ANY,
-                                                   exchange=ANY,
-                                                   expires=ANY,
-                                                   immediate=ANY,
-                                                   link=ANY,
-                                                   link_error=ANY,
-                                                   mandatory=ANY,
-                                                   priority=ANY,
-                                                   producer=ANY,
-                                                   queue=ANY,
-                                                   result_cls=ANY,
-                                                   routing_key=ANY,
-                                                   serializer=ANY,
-                                                   soft_time_limit=ANY,
-                                                   task_id=ANY,
-                                                   task_type=ANY,
-                                                   time_limit=ANY,
-                                                   shadow='fooxyz',
-                                                   ignore_result=False)
-
-        self.app.send_task = old_send_task
-
-    def test_shadow_name_old_task_class(self):
-        def shadow_name(task, args, kwargs, options):
-            return 'fooxyz'
-
-        @self.app.task(base=OldTask, shadow_name=shadow_name)
         def shadowed():
             pass
 
@@ -749,20 +820,20 @@ class test_tasks(TasksCase):
         assert task_headers['id'] == presult.id
         assert task_headers['task'] == task_name
         if test_eta:
-            assert isinstance(task_headers.get('eta'), string_t)
+            assert isinstance(task_headers.get('eta'), str)
             to_datetime = parse_iso8601(task_headers.get('eta'))
             assert isinstance(to_datetime, datetime)
         if test_expires:
-            assert isinstance(task_headers.get('expires'), string_t)
+            assert isinstance(task_headers.get('expires'), str)
             to_datetime = parse_iso8601(task_headers.get('expires'))
             assert isinstance(to_datetime, datetime)
         properties = properties or {}
-        for arg_name, arg_value in items(properties):
+        for arg_name, arg_value in properties.items():
             assert task_properties.get(arg_name) == arg_value
         headers = headers or {}
-        for arg_name, arg_value in items(headers):
+        for arg_name, arg_value in headers.items():
             assert task_headers.get(arg_name) == arg_value
-        for arg_name, arg_value in items(kwargs):
+        for arg_name, arg_value in kwargs.items():
             assert task_kwargs.get(arg_name) == arg_value
 
     def test_incomplete_task_cls(self):
@@ -1222,6 +1293,15 @@ class test_apply_async(TasksCase):
         task2.apply_async((1, 2, 3, 4, {1}))
 
     def test_always_eager_with_task_serializer_option(self):
+        self.app.conf.task_always_eager = True
+        self.app.conf.task_serializer = 'pickle'
+
+        @self.app.task
+        def task(*args, **kwargs):
+            pass
+        task.apply_async((1, 2, 3, 4, {1}))
+
+    def test_always_eager_uses_task_serializer_setting(self):
         self.app.conf.task_always_eager = True
 
         @self.app.task(serializer='pickle')

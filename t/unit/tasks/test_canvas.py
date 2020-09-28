@@ -1,9 +1,7 @@
-from __future__ import absolute_import, unicode_literals
-
 import json
+from unittest.mock import MagicMock, Mock
 
 import pytest
-from case import MagicMock, Mock
 
 from celery._state import _task_stack
 from celery.canvas import (Signature, _chain, _maybe_group, chain, chord,
@@ -269,6 +267,10 @@ class test_chunks(CanvasCase):
 
 class test_chain(CanvasCase):
 
+    def test_chain_of_chain_with_a_single_task(self):
+        s = self.add.s(1, 1)
+        assert chain([chain(s)]).tasks == list(chain(s).tasks)
+
     def test_clone_preserves_state(self):
         x = chain(self.add.s(i, i) for i in range(10))
         assert x.clone().tasks == x.tasks
@@ -277,7 +279,7 @@ class test_chain(CanvasCase):
 
     def test_repr(self):
         x = self.add.s(2, 2) | self.add.s(2)
-        assert repr(x) == '%s(2, 2) | add(2)' % (self.add.name,)
+        assert repr(x) == f'{self.add.name}(2, 2) | add(2)'
 
     def test_apply_async(self):
         c = self.add.s(2, 2) | self.add.s(4) | self.add.s(8)
@@ -437,8 +439,7 @@ class test_chain(CanvasCase):
 
     def test_chain_always_eager(self):
         self.app.conf.task_always_eager = True
-        from celery import _state
-        from celery import result
+        from celery import _state, result
 
         fixture_task_join_will_block = _state.task_join_will_block
         try:
@@ -772,6 +773,23 @@ class test_chord(CanvasCase):
         x.kwargs['body'] = None
         assert 'without body' in repr(x)
 
+    def test_freeze_tasks_body_is_group(self):
+        # Confirm that `group index` is passed from a chord to elements of its
+        # body when the chord itself is encapsulated in a group
+        body_elem = self.add.s()
+        chord_body = group([body_elem])
+        chord_obj = chord(self.add.s(), body=chord_body)
+        top_group = group([chord_obj])
+        # We expect the body to be the signature we passed in before we freeze
+        (embedded_body_elem, ) = chord_obj.body.tasks
+        assert embedded_body_elem is body_elem
+        assert embedded_body_elem.options == dict()
+        # When we freeze the chord, its body will be clones and options set
+        top_group.freeze()
+        (embedded_body_elem, ) = chord_obj.body.tasks
+        assert embedded_body_elem is not body_elem
+        assert embedded_body_elem.options["group_index"] == 0   # 0th task
+
     def test_freeze_tasks_is_not_group(self):
         x = chord([self.add.s(2, 2)], body=self.add.s(), app=self.app)
         x.freeze()
@@ -780,8 +798,7 @@ class test_chord(CanvasCase):
 
     def test_chain_always_eager(self):
         self.app.conf.task_always_eager = True
-        from celery import _state
-        from celery import result
+        from celery import _state, result
 
         fixture_task_join_will_block = _state.task_join_will_block
         try:

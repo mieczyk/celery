@@ -47,12 +47,14 @@ names, are the renaming of some prefixes, like ``celery_beat_`` to ``beat_``,
 ``celeryd_`` to ``worker_``, and most of the top level ``celery_`` settings
 have been moved into a new  ``task_`` prefix.
 
-.. note::
+.. warning::
 
-    Celery will still be able to read old configuration files, so
-    there's no rush in moving to the new settings format. Furthermore,
-    we provide the ``celery upgrade`` command that should handle plenty
-    of cases (including :ref:`Django <latentcall-django-admonition>`).
+    Celery will still be able to read old configuration files until Celery 6.0.
+    Afterwards, support for the old configuration files will be removed.
+    We provide the ``celery upgrade`` command that should handle
+    plenty of cases (including :ref:`Django <latentcall-django-admonition>`).
+
+    Please migrate to the new configuration scheme as soon as possible.
 
 
 ========================================== ==============================================
@@ -113,7 +115,7 @@ have been moved into a new  ``task_`` prefix.
 ``CELERY_MESSAGE_COMPRESSION``             :setting:`result_compression`
 ``CELERY_RESULT_EXCHANGE``                 :setting:`result_exchange`
 ``CELERY_RESULT_EXCHANGE_TYPE``            :setting:`result_exchange_type`
-``CELERY_RESULT_EXPIRES``                  :setting:`result_expires`
+``CELERY_TASK_RESULT_EXPIRES``             :setting:`result_expires`
 ``CELERY_RESULT_PERSISTENT``               :setting:`result_persistent`
 ``CELERY_RESULT_SERIALIZER``               :setting:`result_serializer`
 ``CELERY_RESULT_DBURI``                    Use :setting:`result_backend` instead.
@@ -123,28 +125,28 @@ have been moved into a new  ``task_`` prefix.
 ``CELERY_SECURITY_CERTIFICATE``            :setting:`security_certificate`
 ``CELERY_SECURITY_CERT_STORE``             :setting:`security_cert_store`
 ``CELERY_SECURITY_KEY``                    :setting:`security_key`
-``CELERY_ACKS_LATE``                  :setting:`task_acks_late`
-``CELERY_ACKS_ON_FAILURE_OR_TIMEOUT`` :setting:`task_acks_on_failure_or_timeout`
-``CELERY_ALWAYS_EAGER``               :setting:`task_always_eager`
-``CELERY_ANNOTATIONS``                :setting:`task_annotations`
-``CELERY_COMPRESSION``                :setting:`task_compression`
-``CELERY_CREATE_MISSING_QUEUES``      :setting:`task_create_missing_queues`
-``CELERY_DEFAULT_DELIVERY_MODE``      :setting:`task_default_delivery_mode`
-``CELERY_DEFAULT_EXCHANGE``           :setting:`task_default_exchange`
-``CELERY_DEFAULT_EXCHANGE_TYPE``      :setting:`task_default_exchange_type`
+``CELERY_ACKS_LATE``                       :setting:`task_acks_late`
+``CELERY_ACKS_ON_FAILURE_OR_TIMEOUT``      :setting:`task_acks_on_failure_or_timeout`
+``CELERY_ALWAYS_EAGER``                    :setting:`task_always_eager`
+``CELERY_ANNOTATIONS``                     :setting:`task_annotations`
+``CELERY_COMPRESSION``                     :setting:`task_compression`
+``CELERY_CREATE_MISSING_QUEUES``           :setting:`task_create_missing_queues`
+``CELERY_DEFAULT_DELIVERY_MODE``           :setting:`task_default_delivery_mode`
+``CELERY_DEFAULT_EXCHANGE``                :setting:`task_default_exchange`
+``CELERY_DEFAULT_EXCHANGE_TYPE``           :setting:`task_default_exchange_type`
 ``CELERY_DEFAULT_QUEUE``                   :setting:`task_default_queue`
-``CELERY_DEFAULT_RATE_LIMIT``         :setting:`task_default_rate_limit`
-``CELERY_DEFAULT_ROUTING_KEY``        :setting:`task_default_routing_key`
-``CELERY_EAGER_PROPAGATES``           :setting:`task_eager_propagates`
-``CELERY_IGNORE_RESULT``              :setting:`task_ignore_result`
-``CELERY_PUBLISH_RETRY``              :setting:`task_publish_retry`
-``CELERY_PUBLISH_RETRY_POLICY``       :setting:`task_publish_retry_policy`
+``CELERY_DEFAULT_RATE_LIMIT``              :setting:`task_default_rate_limit`
+``CELERY_DEFAULT_ROUTING_KEY``             :setting:`task_default_routing_key`
+``CELERY_EAGER_PROPAGATES``                :setting:`task_eager_propagates`
+``CELERY_IGNORE_RESULT``                   :setting:`task_ignore_result`
+``CELERY_PUBLISH_RETRY``                   :setting:`task_publish_retry`
+``CELERY_PUBLISH_RETRY_POLICY``            :setting:`task_publish_retry_policy`
 ``CELERY_QUEUES``                          :setting:`task_queues`
 ``CELERY_ROUTES``                          :setting:`task_routes`
-``CELERY_SEND_SENT_EVENT``            :setting:`task_send_sent_event`
-``CELERY_SERIALIZER``                 :setting:`task_serializer`
-``CELERYD_SOFT_TIME_LIMIT``           :setting:`task_soft_time_limit`
-``CELERYD_TIME_LIMIT``                :setting:`task_time_limit`
+``CELERY_SEND_SENT_EVENT``                 :setting:`task_send_sent_event`
+``CELERY_SERIALIZER``                      :setting:`task_serializer`
+``CELERYD_SOFT_TIME_LIMIT``                :setting:`task_soft_time_limit`
+``CELERYD_TIME_LIMIT``                     :setting:`task_time_limit`
 ``CELERY_TRACK_STARTED``                   :setting:`task_track_started`
 ``CELERYD_AGENT``                          :setting:`worker_agent`
 ``CELERYD_AUTOSCALER``                     :setting:`worker_autoscaler`
@@ -608,6 +610,10 @@ Can be one of the following:
     Use `Memcached`_ to store the results.
     See :ref:`conf-cache-result-backend`.
 
+* mongodb
+    Use `MongoDB`_ to store the results.
+    See :ref:`conf-mongodb-result-backend`.
+
 * ``cassandra``
     Use `Cassandra`_ to store the results.
     See :ref:`conf-cassandra-result-backend`.
@@ -659,6 +665,7 @@ Can be one of the following:
 
 .. _`SQLAlchemy`: http://sqlalchemy.org
 .. _`Memcached`: http://memcached.org
+.. _`MongoDB`: http://mongodb.org
 .. _`Redis`: https://redis.io
 .. _`Cassandra`: http://cassandra.apache.org/
 .. _`Elasticsearch`: https://aws.amazon.com/elasticsearch-service/
@@ -670,6 +677,47 @@ Can be one of the following:
 .. _`Consul`: https://consul.io/
 .. _`AzureBlockBlob`: https://azure.microsoft.com/en-us/services/storage/blobs/
 .. _`S3`: https://aws.amazon.com/s3/
+
+
+.. setting:: result_backend_always_retry
+
+``result_backend_always_retry``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Default: :const:`False`
+
+If enable, backend will try to retry on the event of recoverable exceptions instead of propagating the exception.
+It will use an exponential backoff sleep time between 2 retries.
+
+
+.. setting:: result_backend_max_sleep_between_retries_ms
+
+``result_backend_max_sleep_between_retries_ms``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Default: 10000
+
+This specifies the maximum sleep time between two backend operation retry.
+
+
+.. setting:: result_backend_base_sleep_between_retries_ms
+
+``result_backend_base_sleep_between_retries_ms``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Default: 10
+
+This specifies the base amount of sleep time between two backend operation retry.
+
+
+.. setting:: result_backend_max_retries
+
+``result_backend_max_retries``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Default: Inf
+
+This is the maximum of retries in case of recoverable exceptions.
 
 
 .. setting:: result_backend_transport_options
@@ -712,7 +760,7 @@ serialization formats.
 Default: No compression.
 
 Optional compression method used for task results.
-Supports the same options as the :setting:`task_serializer` setting.
+Supports the same options as the :setting:`task_compression` setting.
 
 .. setting:: result_extended
 
@@ -777,6 +825,15 @@ Default: 3.0.
 
 The timeout in seconds (int/float) when joining a group's results within a chord.
 
+.. setting:: result_chord_retry_interval
+
+``result_chord_retry_interval``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Default: 1.0.
+
+Default interval for retrying chord tasks.
+
 .. _conf-database-result-backend:
 
 Database backend settings
@@ -827,7 +884,7 @@ strings (this is the part of the URI that comes after the ``db+`` prefix).
 Default: ``{}`` (empty mapping).
 
 To specify additional SQLAlchemy database engine options you can use
-the :setting:`sqlalchmey_engine_options` setting::
+the :setting:`database_engine_options` setting::
 
     # echo enables verbose logging from SQLAlchemy.
     app.conf.database_engine_options = {'echo': True}
@@ -974,6 +1031,56 @@ setting:
 This setting is no longer used as it's now possible to specify
 the cache backend directly in the :setting:`result_backend` setting.
 
+.. _conf-mongodb-result-backend:
+
+MongoDB backend settings
+------------------------
+
+.. note::
+
+    The MongoDB backend requires the :mod:`pymongo` library:
+    http://github.com/mongodb/mongo-python-driver/tree/master
+
+.. setting:: mongodb_backend_settings
+
+mongodb_backend_settings
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This is a dict supporting the following keys:
+
+* database
+    The database name to connect to. Defaults to ``celery``.
+
+* taskmeta_collection
+    The collection name to store task meta data.
+    Defaults to ``celery_taskmeta``.
+
+* max_pool_size
+    Passed as max_pool_size to PyMongo's Connection or MongoClient
+    constructor. It is the maximum number of TCP connections to keep
+    open to MongoDB at a given time. If there are more open connections
+    than max_pool_size, sockets will be closed when they are released.
+    Defaults to 10.
+
+* options
+
+    Additional keyword arguments to pass to the mongodb connection
+    constructor.  See the :mod:`pymongo` docs to see a list of arguments
+    supported.
+
+.. _example-mongodb-result-config:
+
+Example configuration
+~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    result_backend = 'mongodb://localhost:27017/'
+    mongodb_backend_settings = {
+        'database': 'mydb',
+        'taskmeta_collection': 'my_taskmeta_collection',
+    }
+
 .. _conf-redis-result-backend:
 
 Redis backend settings
@@ -1109,15 +1216,20 @@ in seconds (int/float), used by the redis result backend.
 ``redis_retry_on_timeout``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. versionadded:: 4.4.1
+
 Default: :const:`False`
 
 To retry reading/writing operations on TimeoutError to the Redis server,
-used by the redis result backend.
+used by the redis result backend. Shouldn't set this variable if using Redis
+connection by unix socket.
 
-.. setting:: socket_keepalive
+.. setting:: redis_socket_keepalive
 
-``socket_keepalive``
-~~~~~~~~~~~~~~~~~~~~
+``redis_socket_keepalive``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 4.4.1
 
 Default: :const:`False`
 
@@ -1463,79 +1575,15 @@ Default: 10.0 seconds.
 
 Global timeout,used by the elasticsearch result backend.
 
-.. _conf-riak-result-backend:
+.. setting:: elasticsearch_save_meta_as_text
 
-Riak backend settings
----------------------
+``elasticsearch_save_meta_as_text``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. note::
+Default: :const:`True`
 
-    The Riak backend requires the :pypi:`riak` library.
-
-    To install the this package use :command:`pip`:
-
-    .. code-block:: console
-
-        $ pip install celery[riak]
-
-    See :ref:`bundles` for information on combining multiple extension
-    requirements.
-
-This backend requires the :setting:`result_backend`
-setting to be set to a Riak URL::
-
-    result_backend = 'riak://host:port/bucket'
-
-For example::
-
-    result_backend = 'riak://localhost/celery
-
-is the same as::
-
-    result_backend = 'riak://'
-
-The fields of the URL are defined as follows:
-
-#. ``host``
-
-    Host name or IP address of the Riak server (e.g., `'localhost'`).
-
-#. ``port``
-
-    Port to the Riak server using the protobuf protocol. Default is 8087.
-
-#. ``bucket``
-
-    Bucket name to use. Default is `celery`.
-    The bucket needs to be a string with ASCII characters only.
-
-Alternatively, this backend can be configured with the following configuration directives.
-
-.. setting:: riak_backend_settings
-
-``riak_backend_settings``
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Default: ``{}`` (empty mapping).
-
-This is a dict supporting the following keys:
-
-* ``host``
-
-    The host name of the Riak server. Defaults to ``"localhost"``.
-
-* ``port``
-
-    The port the Riak server is listening to. Defaults to 8087.
-
-* ``bucket``
-
-    The bucket name to connect to. Defaults to "celery".
-
-* ``protocol``
-
-    The protocol to use to connect to the Riak server. This isn't configurable
-    via :setting:`result_backend`
+Should meta saved as text or as native json.
+Result is always serialized as text.
 
 .. _conf-dynamodb-result-backend:
 
@@ -1555,6 +1603,13 @@ AWS DynamoDB backend settings
     See :ref:`bundles` for information on combining multiple extension
     requirements.
 
+.. warning::
+
+    The Dynamodb backend is not compatible with tables that have a sort key defined.
+
+    If you want to query the results table based on something other than the partition key,
+    please define a global secondary index (GSI) instead.
+
 This backend requires the :setting:`result_backend`
 setting to be set to a DynamoDB URL::
 
@@ -1562,7 +1617,7 @@ setting to be set to a DynamoDB URL::
 
 For example, specifying the AWS region and the table name::
 
-    result_backend = 'dynamodb://@us-east-1/celery_results
+    result_backend = 'dynamodb://@us-east-1/celery_results'
 
 or retrieving AWS configuration parameters from the environment, using the default table name (``celery``)
 and specifying read and write provisioned throughput::
@@ -2650,7 +2705,7 @@ Specify if remote control of the workers is enabled.
 .. setting:: worker_proc_alive_timeout
 
 ``worker_proc_alive_timeout``
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Default: 4.0.
 

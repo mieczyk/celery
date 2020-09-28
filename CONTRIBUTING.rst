@@ -345,7 +345,7 @@ Previously these were named ``releaseXX-maint``.
 The versions we currently maintain is:
 
 * 4.2
- 
+
   This is the current series.
 
 * 4.1
@@ -407,7 +407,7 @@ Working on Features & Patches
 Forking and setting up the repository
 -------------------------------------
 
-First you need to fork the Celery repository, a good introduction to this
+First you need to fork the Celery repository; a good introduction to this
 is in the GitHub Guide: `Fork a Repo`_.
 
 After you have cloned the repository, you should checkout your copy
@@ -536,7 +536,7 @@ Assuming a folder structure such as:
 
     + celery_project
       + celery # repository cloned here.
-      + my_project 
+      + my_project
         - manage.py
         + my_project
           - views.py
@@ -592,14 +592,14 @@ To run the Celery test suite you need to install
     $ pip install -U -r requirements/default.txt
 
 After installing the dependencies required, you can now execute
-the test suite by calling :pypi:`py.test <pytest>`:
+the test suite by calling :pypi:`pytest <pytest>`:
 
 .. code-block:: console
 
-    $ py.test t/unit
-    $ py.test t/integration
+    $ pytest t/unit
+    $ pytest t/integration
 
-Some useful options to :command:`py.test` are:
+Some useful options to :command:`pytest` are:
 
 * ``-x``
 
@@ -618,7 +618,7 @@ you can do so like this:
 
 .. code-block:: console
 
-    $ py.test t/unit/worker/test_worker.py
+    $ pytest t/unit/worker/test_worker.py
 
 .. _contributing-coverage:
 
@@ -636,11 +636,11 @@ Installing the :pypi:`pytest-cov` module:
 Code coverage in HTML format
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-#. Run :command:`py.test` with the ``--cov-report=html`` argument enabled:
+#. Run :command:`pytest` with the ``--cov-report=html`` argument enabled:
 
     .. code-block:: console
 
-        $ py.test --cov=celery --cov-report=html
+        $ pytest --cov=celery --cov-report=html
 
 #. The coverage output will then be located in the :file:`htmlcov/` directory:
 
@@ -651,11 +651,11 @@ Code coverage in HTML format
 Code coverage in XML (Cobertura-style)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-#. Run :command:`py.test` with the ``--cov-report=xml`` argument enabled:
+#. Run :command:`pytest` with the ``--cov-report=xml`` argument enabled:
 
 .. code-block:: console
 
-    $ py.test --cov=celery --cov-report=xml
+    $ pytest --cov=celery --cov-report=xml
 
 #. The coverage XML output will then be located in the :file:`coverage.xml` file.
 
@@ -828,7 +828,7 @@ make it easier for the maintainers to accept your proposed changes:
       ``Needs Test Coverage``.
 
 - [ ] Make sure unit test coverage does not decrease.
-      ``py.test -xv --cov=celery --cov-report=xml --cov-report term``.
+      ``pytest -xv --cov=celery --cov-report=xml --cov-report term``.
       You can check the current test coverage here: https://codecov.io/gh/celery/celery
 
 - [ ] Run ``flake8`` against the code. The following commands are valid
@@ -839,23 +839,6 @@ make it easier for the maintainers to accept your proposed changes:
           $ flake8 -j 2 celery/ t/
           $ make flakecheck
           $ tox -e flake8
-
-- [ ] Run ``flakeplus`` against the code. The following commands are valid
-      and equivalent.:
-
-      .. code-block:: console
-
-          $ flakeplus --2.7 celery/ t/
-          $ make flakes
-          $ tox -e flakeplus
-
-- [ ] Run ``pydocstyle`` against the code. The following commands are valid
-      and equivalent.:
-
-      .. code-block:: console
-
-          $ pydocstyle celery/
-          $ tox -e pydocstyle
 
 - [ ]  Build api docs to make sure everything is OK. The following commands are valid
       and equivalent.:
@@ -1084,7 +1067,6 @@ is following the conventions.
         from Queue import Queue, Empty
 
         from .platforms import Pidfile
-        from .five import zip_longest, items, range
         from .utils.time import maybe_timedelta
 
 * Wild-card imports must not be used (`from xxx import *`).

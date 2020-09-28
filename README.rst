@@ -2,7 +2,7 @@
 
 |build-status| |coverage| |license| |wheel| |pyversion| |pyimp| |ocbackerbadge| |ocsponsorbadge|
 
-:Version: 4.4.1 (cliffs)
+:Version: 5.0.0 (singularity)
 :Web: http://celeryproject.org/
 :Download: https://pypi.org/project/celery/
 :Source: https://github.com/celery/celery/
@@ -44,7 +44,7 @@ to high availability and horizontal scaling.
 
 Celery is written in Python, but the protocol can be implemented in any
 language. In addition to Python there's node-celery_ for Node.js,
-a `PHP client`_ and `gocelery`_ for golang.
+a `PHP client`_, `gocelery`_ for golang, and rusty-celery_ for Rust.
 
 Language interoperability can also be achieved by using webhooks
 in such a way that the client enqueues an URL to be requested by a worker.
@@ -52,20 +52,18 @@ in such a way that the client enqueues an URL to be requested by a worker.
 .. _node-celery: https://github.com/mher/node-celery
 .. _`PHP client`: https://github.com/gjedeer/celery-php
 .. _`gocelery`: https://github.com/gocelery/gocelery
+.. _rusty-celery: https://github.com/rusty-celery/rusty-celery
 
 What do I need?
 ===============
 
-Celery version 4.4.0 runs on,
+Celery version 5.0.0 runs on,
 
-- Python (2.7, 3.8, 3.5, 3.6, 3.7)
-- PyPy2.7 (7.2)
-- PyPy3.5 (7.1)
+- Python (3.6, 3.7, 3.8)
 - PyPy3.6 (7.6)
 
 
-4.x.x is the last version to support Python 2.7,
-and from the next major version (Celery 5.x) Python 3.6 or newer is required.
+This is the next version to of celery which will support Python 3.6 or newer.
 
 If you're running an older version of Python, you need to be running
 an older version of Celery:
@@ -73,6 +71,7 @@ an older version of Celery:
 - Python 2.6: Celery series 3.1 or earlier.
 - Python 2.5: Celery series 3.0 or earlier.
 - Python 2.4 was Celery series 2.2 or earlier.
+- Python 2.7: Celery 4.x series.
 
 Celery is a project with minimal funding,
 so we don't support Microsoft Windows.
@@ -90,7 +89,7 @@ Get Started
 ===========
 
 If this is the first time you're trying to use Celery, or you're
-new to Celery 4.4 coming from previous versions then you should read our
+new to Celery 5.0.0 coming from previous versions then you should read our
 getting started tutorials:
 
 - `First steps with Celery`_
@@ -519,7 +518,7 @@ file in the top distribution directory for the full license text.
     :target: https://pypi.org/project/celery/
 
 .. |pyimp| image:: https://img.shields.io/pypi/implementation/celery.svg
-    :alt: Support Python implementations.
+    :alt: Supported Python implementations.
     :target: https://pypi.org/project/celery/
 
 .. |ocbackerbadge| image:: https://opencollective.com/celery/backers/badge.svg

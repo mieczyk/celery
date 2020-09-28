@@ -1,6 +1,5 @@
 -r test-ci-base.txt
 -r extras/auth.txt
--r extras/riak.txt
 -r extras/solar.txt
 -r extras/mongodb.txt
 -r extras/yaml.txt
@@ -21,4 +20,4 @@
 -r extras/azureblockblob.txt
 
 # SQS dependencies other than boto
-pycurl==7.43.0.2  # Latest version with wheel built (for appveyor)
+pycurl==7.43.0.5  # Latest version with wheel built (for appveyor)

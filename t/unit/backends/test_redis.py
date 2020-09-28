@@ -1,19 +1,17 @@
-from __future__ import absolute_import, unicode_literals
-
 import json
 import random
 import ssl
 from contextlib import contextmanager
 from datetime import timedelta
 from pickle import dumps, loads
+from unittest.mock import ANY, Mock, call, patch
 
 import pytest
-from case import ANY, ContextMock, Mock, call, mock, patch, skip
+from case import ContextMock, mock
 
 from celery import signature, states, uuid
 from celery.canvas import Signature
-from celery.exceptions import (ChordError, CPendingDeprecationWarning,
-                               ImproperlyConfigured)
+from celery.exceptions import ChordError, ImproperlyConfigured
 from celery.utils.collections import AttributeDict
 
 
@@ -31,14 +29,14 @@ class ConnectionError(Exception):
     pass
 
 
-class Connection(object):
+class Connection:
     connected = True
 
     def disconnect(self):
         self.connected = False
 
 
-class Pipeline(object):
+class Pipeline:
     def __init__(self, client):
         self.client = client
         self.steps = []
@@ -114,21 +112,47 @@ class Redis(mock.MockCallbacks):
     def pipeline(self):
         return self.Pipeline(self)
 
-    def _get_list(self, key):
-        try:
-            return self.keyspace[key]
-        except KeyError:
-            l = self.keyspace[key] = []
-            return l
+    def _get_unsorted_list(self, key):
+        # We simply store the values in append (rpush) order
+        return self.keyspace.setdefault(key, list())
 
     def rpush(self, key, value):
-        self._get_list(key).append(value)
+        self._get_unsorted_list(key).append(value)
 
     def lrange(self, key, start, stop):
-        return self._get_list(key)[start:stop]
+        return self._get_unsorted_list(key)[start:stop]
 
     def llen(self, key):
-        return len(self.keyspace.get(key) or [])
+        return len(self._get_unsorted_list(key))
+
+    def _get_sorted_set(self, key):
+        # We store 2-tuples of (score, value) and sort after each append (zadd)
+        return self.keyspace.setdefault(key, list())
+
+    def zadd(self, key, mapping):
+        # Store elements as 2-tuples with the score first so we can sort it
+        # once the new items have been inserted
+        fake_sorted_set = self._get_sorted_set(key)
+        fake_sorted_set.extend(
+            (score, value) for value, score in mapping.items()
+        )
+        fake_sorted_set.sort()
+
+    def zrange(self, key, start, stop):
+        # `stop` is inclusive in Redis so we use `stop + 1` unless that would
+        # cause us to move from negative (right-most) indicies to positive
+        stop = stop + 1 if stop != -1 else None
+        return [e[1] for e in self._get_sorted_set(key)[start:stop]]
+
+    def zrangebyscore(self, key, min_, max_):
+        return [
+            e[1] for e in self._get_sorted_set(key)
+            if (min_ == "-inf" or e[0] >= min_) and
+            (max_ == "+inf" or e[1] <= max_)
+        ]
+
+    def zcount(self, key, min_, max_):
+        return len(self.zrangebyscore(key, min_, max_))
 
 
 class Sentinel(mock.MockCallbacks):
@@ -144,19 +168,19 @@ class Sentinel(mock.MockCallbacks):
         return random.choice(self.sentinels)
 
 
-class redis(object):
+class redis:
     StrictRedis = Redis
 
-    class ConnectionPool(object):
+    class ConnectionPool:
         def __init__(self, **kwargs):
             pass
 
-    class UnixDomainSocketConnection(object):
+    class UnixDomainSocketConnection:
         def __init__(self, **kwargs):
             pass
 
 
-class sentinel(object):
+class sentinel:
     Sentinel = Sentinel
 
 
@@ -243,7 +267,7 @@ class test_RedisResultConsumer:
         meta = {'task_id': 'initial', 'status': states.SUCCESS}
         consumer = self.get_consumer()
         consumer.start('initial')
-        consumer.backend.set(b'celery-task-meta-initial', json.dumps(meta))
+        consumer.backend._set_with_state(b'celery-task-meta-initial', json.dumps(meta), states.SUCCESS)
         consumer._pubsub.get_message.side_effect = ConnectionError()
         consumer.drain_events()
         parent_on_state_change.assert_called_with(meta, None)
@@ -269,8 +293,9 @@ class test_RedisBackend:
         self.b = self.Backend(app=self.app)
 
     @pytest.mark.usefixtures('depends_on_current_app')
-    @skip.unless_module('redis')
     def test_reduce(self):
+        pytest.importorskip('redis')
+
         from celery.backends.redis import RedisBackend
         x = RedisBackend(app=self.app)
         assert loads(dumps(x))
@@ -294,8 +319,9 @@ class test_RedisBackend:
         assert x.connparams['socket_timeout'] == 30.0
         assert x.connparams['socket_connect_timeout'] == 100.0
 
-    @skip.unless_module('redis')
     def test_timeouts_in_url_coerced(self):
+        pytest.importorskip('redis')
+
         x = self.Backend(
             ('redis://:bosco@vandelay.com:123//1?'
              'socket_timeout=30&socket_connect_timeout=100'),
@@ -309,8 +335,9 @@ class test_RedisBackend:
         assert x.connparams['socket_timeout'] == 30
         assert x.connparams['socket_connect_timeout'] == 100
 
-    @skip.unless_module('redis')
     def test_socket_url(self):
+        pytest.importorskip('redis')
+
         self.app.conf.redis_socket_timeout = 30.0
         self.app.conf.redis_socket_connect_timeout = 100.0
         x = self.Backend(
@@ -324,10 +351,12 @@ class test_RedisBackend:
         assert 'port' not in x.connparams
         assert x.connparams['socket_timeout'] == 30.0
         assert 'socket_connect_timeout' not in x.connparams
+        assert 'socket_keepalive' not in x.connparams
         assert x.connparams['db'] == 3
 
-    @skip.unless_module('redis')
     def test_backend_ssl(self):
+        pytest.importorskip('redis')
+
         self.app.conf.redis_backend_use_ssl = {
             'ssl_cert_reqs': ssl.CERT_REQUIRED,
             'ssl_ca_certs': '/path/to/ca.crt',
@@ -354,12 +383,13 @@ class test_RedisBackend:
         from redis.connection import SSLConnection
         assert x.connparams['connection_class'] is SSLConnection
 
-    @skip.unless_module('redis')
     @pytest.mark.parametrize('cert_str', [
         "required",
         "CERT_REQUIRED",
     ])
     def test_backend_ssl_certreq_str(self, cert_str):
+        pytest.importorskip('redis')
+
         self.app.conf.redis_backend_use_ssl = {
             'ssl_cert_reqs': cert_str,
             'ssl_ca_certs': '/path/to/ca.crt',
@@ -386,12 +416,13 @@ class test_RedisBackend:
         from redis.connection import SSLConnection
         assert x.connparams['connection_class'] is SSLConnection
 
-    @skip.unless_module('redis')
     @pytest.mark.parametrize('cert_str', [
         "required",
         "CERT_REQUIRED",
     ])
     def test_backend_ssl_url(self, cert_str):
+        pytest.importorskip('redis')
+
         self.app.conf.redis_socket_timeout = 30.0
         self.app.conf.redis_socket_connect_timeout = 100.0
         x = self.Backend(
@@ -410,12 +441,13 @@ class test_RedisBackend:
         from redis.connection import SSLConnection
         assert x.connparams['connection_class'] is SSLConnection
 
-    @skip.unless_module('redis')
     @pytest.mark.parametrize('cert_str', [
         "none",
         "CERT_NONE",
     ])
     def test_backend_ssl_url_options(self, cert_str):
+        pytest.importorskip('redis')
+
         x = self.Backend(
             (
                 'rediss://:bosco@vandelay.com:123//1'
@@ -436,12 +468,13 @@ class test_RedisBackend:
         assert x.connparams['ssl_certfile'] == '/var/ssl/redis-server-cert.pem'
         assert x.connparams['ssl_keyfile'] == '/var/ssl/private/worker-key.pem'
 
-    @skip.unless_module('redis')
     @pytest.mark.parametrize('cert_str', [
         "optional",
         "CERT_OPTIONAL",
     ])
     def test_backend_ssl_url_cert_none(self, cert_str):
+        pytest.importorskip('redis')
+
         x = self.Backend(
             'rediss://:bosco@vandelay.com:123//1?ssl_cert_reqs=%s' % cert_str,
             app=self.app,
@@ -455,30 +488,18 @@ class test_RedisBackend:
         from redis.connection import SSLConnection
         assert x.connparams['connection_class'] is SSLConnection
 
-    @skip.unless_module('redis')
     @pytest.mark.parametrize("uri", [
         'rediss://:bosco@vandelay.com:123//1?ssl_cert_reqs=CERT_KITTY_CATS',
         'rediss://:bosco@vandelay.com:123//1'
     ])
     def test_backend_ssl_url_invalid(self, uri):
+        pytest.importorskip('redis')
+
         with pytest.raises(ValueError):
             self.Backend(
                 uri,
                 app=self.app,
             )
-
-    def test_compat_propertie(self):
-        x = self.Backend(
-            'redis://:bosco@vandelay.com:123//1', app=self.app,
-        )
-        with pytest.warns(CPendingDeprecationWarning):
-            assert x.host == 'vandelay.com'
-        with pytest.warns(CPendingDeprecationWarning):
-            assert x.db == 1
-        with pytest.warns(CPendingDeprecationWarning):
-            assert x.port == 123
-        with pytest.warns(CPendingDeprecationWarning):
-            assert x.password == 'bosco'
 
     def test_conf_raises_KeyError(self):
         self.app.conf = AttributeDict({
@@ -501,6 +522,29 @@ class test_RedisBackend:
         logger.error.assert_called_with(self.E_LOST, 2, 10, 'in 20.00 seconds')
         assert self.b.on_connection_error(10, exc, intervals, 3) == 30
         logger.error.assert_called_with(self.E_LOST, 3, 10, 'in 30.00 seconds')
+
+    @patch('celery.backends.redis.retry_over_time')
+    def test_retry_policy_conf(self, retry_over_time):
+        self.app.conf.result_backend_transport_options = dict(
+            retry_policy=dict(
+                max_retries=2,
+                interval_start=0,
+                interval_step=0.01,
+            ),
+        )
+        b = self.Backend(app=self.app)
+
+        def fn():
+            return 1
+
+        # We don't want to re-test retry_over_time, just check we called it
+        # with the expected args
+        b.ensure(fn, (),)
+
+        retry_over_time.assert_called_with(
+            fn, b.connection_errors, (), {}, ANY,
+            max_retries=2, interval_start=0, interval_step=0.01, interval_max=1
+        )
 
     def test_incr(self):
         self.b.client = Mock(name='client')
@@ -539,7 +583,7 @@ class test_RedisBackend:
 
     def test_on_chord_part_return_no_gid_or_tid(self):
         request = Mock(name='request')
-        request.id = request.group = None
+        request.id = request.group = request.group_index = None
         assert self.b.on_chord_part_return(request, 'SUCCESS', 10) is None
 
     def test_ConnectionPool(self):
@@ -577,22 +621,45 @@ class test_RedisBackend:
 
     def test_set_no_expire(self):
         self.b.expires = None
-        self.b.set('foo', 'bar')
+        self.b._set_with_state('foo', 'bar', states.SUCCESS)
 
-    def create_task(self):
+    def create_task(self, i):
         tid = uuid()
-        task = Mock(name='task-{0}'.format(tid))
+        task = Mock(name=f'task-{tid}')
         task.name = 'foobarbaz'
         self.app.tasks['foobarbaz'] = task
         task.request.chord = signature(task)
         task.request.id = tid
         task.request.chord['chord_size'] = 10
         task.request.group = 'group_id'
+        task.request.group_index = i
         return task
 
     @patch('celery.result.GroupResult.restore')
     def test_on_chord_part_return(self, restore):
-        tasks = [self.create_task() for i in range(10)]
+        tasks = [self.create_task(i) for i in range(10)]
+        random.shuffle(tasks)
+
+        for i in range(10):
+            self.b.on_chord_part_return(tasks[i].request, states.SUCCESS, i)
+            assert self.b.client.zadd.call_count
+            self.b.client.zadd.reset_mock()
+        assert self.b.client.zrangebyscore.call_count
+        jkey = self.b.get_key_for_group('group_id', '.j')
+        tkey = self.b.get_key_for_group('group_id', '.t')
+        self.b.client.delete.assert_has_calls([call(jkey), call(tkey)])
+        self.b.client.expire.assert_has_calls([
+            call(jkey, 86400), call(tkey, 86400),
+        ])
+
+    @patch('celery.result.GroupResult.restore')
+    def test_on_chord_part_return__unordered(self, restore):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=False,
+        )
+
+        tasks = [self.create_task(i) for i in range(10)]
+        random.shuffle(tasks)
 
         for i in range(10):
             self.b.on_chord_part_return(tasks[i].request, states.SUCCESS, i)
@@ -607,10 +674,53 @@ class test_RedisBackend:
         ])
 
     @patch('celery.result.GroupResult.restore')
+    def test_on_chord_part_return__ordered(self, restore):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=True,
+        )
+
+        tasks = [self.create_task(i) for i in range(10)]
+        random.shuffle(tasks)
+
+        for i in range(10):
+            self.b.on_chord_part_return(tasks[i].request, states.SUCCESS, i)
+            assert self.b.client.zadd.call_count
+            self.b.client.zadd.reset_mock()
+        assert self.b.client.zrangebyscore.call_count
+        jkey = self.b.get_key_for_group('group_id', '.j')
+        tkey = self.b.get_key_for_group('group_id', '.t')
+        self.b.client.delete.assert_has_calls([call(jkey), call(tkey)])
+        self.b.client.expire.assert_has_calls([
+            call(jkey, 86400), call(tkey, 86400),
+        ])
+
+    @patch('celery.result.GroupResult.restore')
     def test_on_chord_part_return_no_expiry(self, restore):
         old_expires = self.b.expires
         self.b.expires = None
-        tasks = [self.create_task() for i in range(10)]
+        tasks = [self.create_task(i) for i in range(10)]
+
+        for i in range(10):
+            self.b.on_chord_part_return(tasks[i].request, states.SUCCESS, i)
+            assert self.b.client.zadd.call_count
+            self.b.client.zadd.reset_mock()
+        assert self.b.client.zrangebyscore.call_count
+        jkey = self.b.get_key_for_group('group_id', '.j')
+        tkey = self.b.get_key_for_group('group_id', '.t')
+        self.b.client.delete.assert_has_calls([call(jkey), call(tkey)])
+        self.b.client.expire.assert_not_called()
+
+        self.b.expires = old_expires
+
+    @patch('celery.result.GroupResult.restore')
+    def test_on_chord_part_return_no_expiry__unordered(self, restore):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=False,
+        )
+
+        old_expires = self.b.expires
+        self.b.expires = None
+        tasks = [self.create_task(i) for i in range(10)]
 
         for i in range(10):
             self.b.on_chord_part_return(tasks[i].request, states.SUCCESS, i)
@@ -624,7 +734,51 @@ class test_RedisBackend:
 
         self.b.expires = old_expires
 
+    @patch('celery.result.GroupResult.restore')
+    def test_on_chord_part_return_no_expiry__ordered(self, restore):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=True,
+        )
+
+        old_expires = self.b.expires
+        self.b.expires = None
+        tasks = [self.create_task(i) for i in range(10)]
+
+        for i in range(10):
+            self.b.on_chord_part_return(tasks[i].request, states.SUCCESS, i)
+            assert self.b.client.zadd.call_count
+            self.b.client.zadd.reset_mock()
+        assert self.b.client.zrangebyscore.call_count
+        jkey = self.b.get_key_for_group('group_id', '.j')
+        tkey = self.b.get_key_for_group('group_id', '.t')
+        self.b.client.delete.assert_has_calls([call(jkey), call(tkey)])
+        self.b.client.expire.assert_not_called()
+
+        self.b.expires = old_expires
+
     def test_on_chord_part_return__success(self):
+        with self.chord_context(2) as (_, request, callback):
+            self.b.on_chord_part_return(request, states.SUCCESS, 10)
+            callback.delay.assert_not_called()
+            self.b.on_chord_part_return(request, states.SUCCESS, 20)
+            callback.delay.assert_called_with([10, 20])
+
+    def test_on_chord_part_return__success__unordered(self):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=False,
+        )
+
+        with self.chord_context(2) as (_, request, callback):
+            self.b.on_chord_part_return(request, states.SUCCESS, 10)
+            callback.delay.assert_not_called()
+            self.b.on_chord_part_return(request, states.SUCCESS, 20)
+            callback.delay.assert_called_with([10, 20])
+
+    def test_on_chord_part_return__success__ordered(self):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=True,
+        )
+
         with self.chord_context(2) as (_, request, callback):
             self.b.on_chord_part_return(request, states.SUCCESS, 10)
             callback.delay.assert_not_called()
@@ -640,7 +794,49 @@ class test_RedisBackend:
                 callback.id, exc=ANY,
             )
 
+    def test_on_chord_part_return__callback_raises__unordered(self):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=False,
+        )
+
+        with self.chord_context(1) as (_, request, callback):
+            callback.delay.side_effect = KeyError(10)
+            task = self.app._tasks['add'] = Mock(name='add_task')
+            self.b.on_chord_part_return(request, states.SUCCESS, 10)
+            task.backend.fail_from_current_stack.assert_called_with(
+                callback.id, exc=ANY,
+            )
+
+    def test_on_chord_part_return__callback_raises__ordered(self):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=True,
+        )
+
+        with self.chord_context(1) as (_, request, callback):
+            callback.delay.side_effect = KeyError(10)
+            task = self.app._tasks['add'] = Mock(name='add_task')
+            self.b.on_chord_part_return(request, states.SUCCESS, 10)
+            task.backend.fail_from_current_stack.assert_called_with(
+                callback.id, exc=ANY,
+            )
+
     def test_on_chord_part_return__ChordError(self):
+        with self.chord_context(1) as (_, request, callback):
+            self.b.client.pipeline = ContextMock()
+            raise_on_second_call(self.b.client.pipeline, ChordError())
+            self.b.client.pipeline.return_value.zadd().zcount().get().expire(
+            ).expire().execute.return_value = (1, 1, 0, 4, 5)
+            task = self.app._tasks['add'] = Mock(name='add_task')
+            self.b.on_chord_part_return(request, states.SUCCESS, 10)
+            task.backend.fail_from_current_stack.assert_called_with(
+                callback.id, exc=ANY,
+            )
+
+    def test_on_chord_part_return__ChordError__unordered(self):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=False,
+        )
+
         with self.chord_context(1) as (_, request, callback):
             self.b.client.pipeline = ContextMock()
             raise_on_second_call(self.b.client.pipeline, ChordError())
@@ -652,7 +848,39 @@ class test_RedisBackend:
                 callback.id, exc=ANY,
             )
 
+    def test_on_chord_part_return__ChordError__ordered(self):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=True,
+        )
+
+        with self.chord_context(1) as (_, request, callback):
+            self.b.client.pipeline = ContextMock()
+            raise_on_second_call(self.b.client.pipeline, ChordError())
+            self.b.client.pipeline.return_value.zadd().zcount().get().expire(
+            ).expire().execute.return_value = (1, 1, 0, 4, 5)
+            task = self.app._tasks['add'] = Mock(name='add_task')
+            self.b.on_chord_part_return(request, states.SUCCESS, 10)
+            task.backend.fail_from_current_stack.assert_called_with(
+                callback.id, exc=ANY,
+            )
+
     def test_on_chord_part_return__other_error(self):
+        with self.chord_context(1) as (_, request, callback):
+            self.b.client.pipeline = ContextMock()
+            raise_on_second_call(self.b.client.pipeline, RuntimeError())
+            self.b.client.pipeline.return_value.zadd().zcount().get().expire(
+            ).expire().execute.return_value = (1, 1, 0, 4, 5)
+            task = self.app._tasks['add'] = Mock(name='add_task')
+            self.b.on_chord_part_return(request, states.SUCCESS, 10)
+            task.backend.fail_from_current_stack.assert_called_with(
+                callback.id, exc=ANY,
+            )
+
+    def test_on_chord_part_return__other_error__unordered(self):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=False,
+        )
+
         with self.chord_context(1) as (_, request, callback):
             self.b.client.pipeline = ContextMock()
             raise_on_second_call(self.b.client.pipeline, RuntimeError())
@@ -664,13 +892,30 @@ class test_RedisBackend:
                 callback.id, exc=ANY,
             )
 
+    def test_on_chord_part_return__other_error__ordered(self):
+        self.app.conf.result_backend_transport_options = dict(
+            result_chord_ordered=True,
+        )
+
+        with self.chord_context(1) as (_, request, callback):
+            self.b.client.pipeline = ContextMock()
+            raise_on_second_call(self.b.client.pipeline, RuntimeError())
+            self.b.client.pipeline.return_value.zadd().zcount().get().expire(
+            ).expire().execute.return_value = (1, 1, 0, 4, 5)
+            task = self.app._tasks['add'] = Mock(name='add_task')
+            self.b.on_chord_part_return(request, states.SUCCESS, 10)
+            task.backend.fail_from_current_stack.assert_called_with(
+                callback.id, exc=ANY,
+            )
+
     @contextmanager
     def chord_context(self, size=1):
         with patch('celery.backends.redis.maybe_signature') as ms:
-            tasks = [self.create_task() for i in range(size)]
+            tasks = [self.create_task(i) for i in range(size)]
             request = Mock(name='request')
             request.id = 'id1'
             request.group = 'gid1'
+            request.group_index = None
             callback = ms.return_value = Signature('add')
             callback.id = 'id1'
             callback['chord_size'] = size
@@ -718,8 +963,9 @@ class test_SentinelBackend:
         self.b = self.Backend(app=self.app)
 
     @pytest.mark.usefixtures('depends_on_current_app')
-    @skip.unless_module('redis')
     def test_reduce(self):
+        pytest.importorskip('redis')
+
         from celery.backends.redis import SentinelBackend
         x = SentinelBackend(app=self.app)
         assert loads(dumps(x))

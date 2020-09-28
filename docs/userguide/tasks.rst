@@ -31,7 +31,7 @@ instead. See also the FAQ entry :ref:`faq-acks_late-vs-retry`.
 
 Note that the worker will acknowledge the message if the child process executing
 the task is terminated (either by the task calling :func:`sys.exit`, or by signal)
-even when :attr:`~Task.acks_late` is enabled.  This behavior is by purpose
+even when :attr:`~Task.acks_late` is enabled.  This behavior is intentional
 as...
 
 #. We don't want to rerun tasks that forces the kernel to send
@@ -67,7 +67,7 @@ consider enabling the :setting:`task_reject_on_worker_lost` setting.
     The default prefork pool scheduler is not friendly to long-running tasks,
     so if you have tasks that run for minutes/hours make sure you enable
     the :option:`-Ofair <celery worker -O>` command-line argument to
-    the :program:`celery worker`. See :ref:`prefork-pool-prefetch` for more
+    the :program:`celery worker`. See :ref:`optimizing-prefetch-limit` for more
     information, and for the best performance route long-running and
     short-running tasks to dedicated workers (:ref:`routing-automatic`).
 
